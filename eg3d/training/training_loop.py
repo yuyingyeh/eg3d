@@ -70,6 +70,60 @@ def setup_snapshot_image_grid(training_set, random_seed=0):
     images, labels = zip(*[training_set[i] for i in grid_indices])
     return (gw, gh), np.stack(images), np.stack(labels)
 
+
+def setup_snapshot_svbrdf_grid(training_set, random_seed=0):
+    rnd = np.random.RandomState(random_seed)
+    gw = np.clip(7680 // training_set.image_shape[2], 7, 32)
+    gh = np.clip(4320 // training_set.image_shape[1], 4, 32)
+
+    # No labels => show random subset of training samples.
+    if not training_set.has_labels:
+        all_indices = list(range(len(training_set)))
+        rnd.shuffle(all_indices)
+        grid_indices = [all_indices[i % len(all_indices)] for i in range(gw * gh)]
+
+    else:
+        # Group training samples by label.
+        label_groups = dict() # label => [idx, ...]
+        for idx in range(len(training_set)):
+            label = tuple(training_set.get_details(idx).raw_label.flat[::-1])
+            if label not in label_groups:
+                label_groups[label] = []
+            label_groups[label].append(idx)
+
+        # Reorder.
+        label_order = list(label_groups.keys())
+        rnd.shuffle(label_order)
+        for label in label_order:
+            rnd.shuffle(label_groups[label])
+
+        # Organize into grid.
+        grid_indices = []
+        for y in range(gh):
+            label = label_order[y % len(label_order)]
+            indices = label_groups[label]
+            grid_indices += [indices[x % len(indices)] for x in range(gw)]
+            label_groups[label] = [indices[(i + gw) % len(indices)] for i in range(len(indices))]
+
+    # Load data.
+    images, labels = zip(*[training_set[i] for i in grid_indices])
+    # concatenate diffuse, normal, roughness
+    # images: 120 tuple with (7, 512, 512)
+    img_verts = []
+    for img in images:
+        img_vert = np.concatenate([img[:3], img[3:6], np.repeat(img[6:], 3, axis=0)], axis=1)  # vertical
+        img_verts.append(img_vert)
+    return (gw, gh), np.stack(img_verts), np.stack(labels)
+
+
+def save_svbrdf_grid(images, fname, drange, grid_size):
+    img_verts = []
+    for img in images:
+        img_vert = np.concatenate([img[:3], img[3:6], np.repeat(img[6:], 3, axis=0)], axis=1)  # vertical
+        img_verts.append(img_vert)
+
+    save_image_grid(np.stack(img_verts), fname, drange, grid_size)
+
 #----------------------------------------------------------------------------
 
 def save_image_grid(img, fname, drange, grid_size):
@@ -134,7 +188,7 @@ def training_loop(
     torch.backends.cudnn.benchmark = cudnn_benchmark    # Improves training speed.
     torch.backends.cuda.matmul.allow_tf32 = False       # Improves numerical accuracy.
     torch.backends.cudnn.allow_tf32 = False             # Improves numerical accuracy.
-    torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False  # Improves numerical accuracy.
+    # torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False  # Improves numerical accuracy.
     conv2d_gradfix.enabled = True                       # Improves training speed. # TODO: ENABLE
     grid_sample_gradfix.enabled = False                  # Avoids errors with the augmentation pipe.
 
@@ -225,7 +279,8 @@ def training_loop(
     grid_c = None
     if rank == 0:
         print('Exporting sample images...')
-        grid_size, images, labels = setup_snapshot_image_grid(training_set=training_set)
+        # grid_size, images, labels = setup_snapshot_image_grid(training_set=training_set)
+        grid_size, images, labels = setup_snapshot_svbrdf_grid(training_set=training_set)
         save_image_grid(images, os.path.join(run_dir, 'reals.png'), drange=[0,255], grid_size=grid_size)
         grid_z = torch.randn([labels.shape[0], G.z_dim], device=device).split(batch_gpu)
         grid_c = torch.from_numpy(labels).to(device).split(batch_gpu)
@@ -361,10 +416,12 @@ def training_loop(
             out = [G_ema(z=z, c=c, noise_mode='const') for z, c in zip(grid_z, grid_c)]
             images = torch.cat([o['image'].cpu() for o in out]).numpy()
             images_raw = torch.cat([o['image_raw'].cpu() for o in out]).numpy()
-            images_depth = -torch.cat([o['image_depth'].cpu() for o in out]).numpy()
-            save_image_grid(images, os.path.join(run_dir, f'fakes{cur_nimg//1000:06d}.png'), drange=[-1,1], grid_size=grid_size)
-            save_image_grid(images_raw, os.path.join(run_dir, f'fakes{cur_nimg//1000:06d}_raw.png'), drange=[-1,1], grid_size=grid_size)
-            save_image_grid(images_depth, os.path.join(run_dir, f'fakes{cur_nimg//1000:06d}_depth.png'), drange=[images_depth.min(), images_depth.max()], grid_size=grid_size)
+            # images_depth = -torch.cat([o['image_depth'].cpu() for o in out]).numpy()
+            # save_image_grid(images, os.path.join(run_dir, f'fakes{cur_nimg//1000:06d}.png'), drange=[-1,1], grid_size=grid_size)
+            # save_image_grid(images_raw, os.path.join(run_dir, f'fakes{cur_nimg//1000:06d}_raw.png'), drange=[-1,1], grid_size=grid_size)
+            # save_image_grid(images_depth, os.path.join(run_dir, f'fakes{cur_nimg//1000:06d}_depth.png'), drange=[images_depth.min(), images_depth.max()], grid_size=grid_size)
+            save_svbrdf_grid(images, os.path.join(run_dir, f'fakes{cur_nimg//1000:06d}.png'), drange=[-1,1], grid_size=grid_size)
+            save_svbrdf_grid(images_raw, os.path.join(run_dir, f'fakes{cur_nimg//1000:06d}_raw.png'), drange=[-1,1], grid_size=grid_size)
 
             #--------------------
             # # Log forward-conditioned images

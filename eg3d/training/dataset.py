@@ -242,3 +242,134 @@ class ImageFolderDataset(Dataset):
         return labels
 
 #----------------------------------------------------------------------------
+
+class SvbrdfFolderDataset(Dataset):
+    def __init__(self,
+        path,                    # Path to dataset, e.g. BRDFOriginDataset
+        resolution      = None,  # Ensure specific resolution, None = highest available.
+        **super_kwargs,          # Additional arguments for the Dataset base class.
+    ):
+        self._path = path
+        self._zipfile = None
+
+        if os.path.isdir(self._path):
+            self._type = 'dir'
+            # assume SVBRDF maps are in Material__XXX/tiled/<diffuse/normal/rough>_tiled.png
+            # self._all_fnames = {os.path.relpath(os.path.join(root, fname), start=self._path)
+            #                         for root, _dirs, files in os.walk(self._path) for fname in files}
+            self._image_dnames = []
+            for root, dirs, files in os.walk(self._path):
+                for d in dirs:
+                    folder = os.path.join(root, d, 'tiled')
+                    # check exist
+                    isExist = True
+                    for brdf in ['diffuse', 'normal', 'rough']:
+                        fname = os.path.join(folder, '%s_tiled.png' % brdf)
+                        if not os.path.exists(fname):
+                            isExist = False
+                            break
+                    if isExist:
+                        self._image_dnames.append(folder)
+                break
+        else:
+            raise IOError('Path must point to a directory')
+
+        PIL.Image.init()
+        # self._image_fnames = sorted(
+        #     fname for fname in self._all_fnames if self._file_ext(fname) in PIL.Image.EXTENSION)
+        # if len(self._image_fnames) == 0:
+        #     raise IOError('No image files found in the specified path')
+        self._image_dnames = sorted(self._image_dnames)
+        if len(self._image_dnames) == 0:
+            raise IOError('No SVBRDF data found in the specified path')
+
+        name = os.path.splitext(os.path.basename(self._path))[0]
+        raw_shape = [len(self._image_dnames)] + list(self._load_raw_image(0).shape)
+        if resolution is not None and (raw_shape[2] != resolution or raw_shape[3] != resolution):
+            raise IOError('Image files do not match the specified resolution')
+        super().__init__(name=name, raw_shape=raw_shape, **super_kwargs)
+
+    def _load_raw_image(self, raw_idx):
+        # Load diffuse, normal, and rough and then make it a 7-d image
+        dname = self._image_dnames[raw_idx]
+        hyper_image = []
+        for brdf in ['diffuse', 'normal', 'rough']:
+            fname = os.path.join(dname, '%s_tiled.png' % brdf)
+            with self._open_file(fname) as f:
+                if pyspng is not None and self._file_ext(fname) == '.png':
+                    image = pyspng.load(f.read())
+                else:
+                    image = np.array(PIL.Image.open(f))
+            if brdf == 'rough' and image.ndim == 3:
+                image = image[:, :, 0]
+            if image.ndim == 2:
+                image = image[:, :, np.newaxis]  # HW => HWC
+            image = image.transpose(2, 0, 1)  # HWC => CHW
+            hyper_image.append(image)
+        hyper_image = np.concatenate(hyper_image, axis=0)
+        return hyper_image
+
+    def _open_file(self, fname):
+        return open(fname, 'rb')
+
+
+class SvbrdfLowFolderDataset(Dataset):
+    def __init__(self,
+        path,                    # Path to dataset, e.g. Data_Deschaintre18
+        resolution      = None,  # Ensure specific resolution, None = highest available.
+        **super_kwargs,          # Additional arguments for the Dataset base class.
+    ):
+        self._path = path
+        self._zipfile = None
+
+        if os.path.isdir(self._path):
+            self._type = 'dir'
+            # assume SVBRDF maps are in trainBlended/'00XXXXX;XXXX.png'
+            # self._all_fnames = {os.path.relpath(os.path.join(root, fname), start=self._path)
+            #                         for root, _dirs, files in os.walk(self._path) for fname in files}
+            for root, dirs, files in os.walk(self._path):
+                if 'trainBlended' in root:
+                    self._image_fnames = sorted(os.path.join(root, fname) for fname in files)
+        else:
+            raise IOError('Path must point to a directory')
+
+        PIL.Image.init()
+        # self._image_fnames = sorted(
+        #     fname for fname in self._all_fnames if self._file_ext(fname) in PIL.Image.EXTENSION)
+        # if len(self._image_fnames) == 0:
+        #     raise IOError('No image files found in the specified path')
+        self._image_fnames = sorted(self._image_fnames)
+        if len(self._image_fnames) == 0:
+            raise IOError('No SVBRDF data found in the specified path')
+
+        name = os.path.splitext(os.path.basename(self._path))[0]
+        raw_shape = [len(self._image_fnames)] + list(self._load_raw_image(0).shape)
+        if resolution is not None and (raw_shape[2] != resolution or raw_shape[3] != resolution):
+            raise IOError('Image files do not match the specified resolution')
+        super().__init__(name=name, raw_shape=raw_shape, **super_kwargs)
+
+    def _load_raw_image(self, raw_idx):
+        # Load diffuse, normal, and rough and then make it a 7-d image
+        fname = self._image_fnames[raw_idx]
+        with self._open_file(fname) as f:
+            image = np.array(PIL.Image.open(f).resize((256 * 5, 256)))
+            # if pyspng is not None and self._file_ext(fname) == '.png':
+            #     image = pyspng.load(f.read())
+            # else:
+            #     image = np.array(PIL.Image.open(f))
+            image = image.transpose(2, 0, 1)  # HWC => CHW
+
+        C, H, W_5 = image.shape
+        W = W_5 // 5
+        assert H == W
+
+        diffuse = image[:, :, 2 * W:3 * W]
+        normal = image[:, :, 1 * W:2 * W]
+        rough = image[0, :, 3 * W:4 * W]
+        rough = rough[np.newaxis, :, :]
+        hyper_image = [diffuse, normal, rough]
+        hyper_image = np.concatenate(hyper_image, axis=0)
+        return hyper_image
+
+    def _open_file(self, fname):
+        return open(fname, 'rb')
