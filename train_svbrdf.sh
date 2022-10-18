@@ -6,6 +6,7 @@ gpus="${3:-"1"}"
 batch="${4:-"4"}"
 gamma="${5:-"40"}"
 snap="${6:-"1"}"
+workers="${7:-"1"}"
 
 cd eg3d
 
@@ -16,5 +17,5 @@ cd eg3d
 
 # L109: SvbrdfLowFolderDataset
 # monoplane.py L45 Superresolution256
-python3 train_svbrdf.py --outdir=$outdir --cfg=ffhq --data=$dataRoot \
+python3 train_svbrdf.py --outdir=$outdir --cfg=ffhq --data=$dataRoot --workers=$workers\
   --gpus=$gpus --batch=$batch --gamma=$gamma --gen_pose_cond=False --cond=False --density_reg 0 --metrics none --snap $snap
