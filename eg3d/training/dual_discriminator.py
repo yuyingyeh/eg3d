@@ -30,6 +30,7 @@ class SingleDiscriminator(torch.nn.Module):
         conv_clamp          = 256,      # Clamp the output of convolution layers to +-X, None = disable clamping.
         cmap_dim            = None,     # Dimensionality of mapped conditioning label, None = default.
         sr_upsample_factor  = 1,        # Ignored for SingleDiscriminator
+        disc_c_noise        = 0,        # Ignored for SingleDiscriminator
         block_kwargs        = {},       # Arguments for DiscriminatorBlock.
         mapping_kwargs      = {},       # Arguments for MappingNetwork.
         epilogue_kwargs     = {},       # Arguments for DiscriminatorEpilogue.
