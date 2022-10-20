@@ -4,9 +4,11 @@ outdir="${1:-"~/training-runs"}"
 dataRoot="${2:-"/home/yyyeh/Datasets/Data_Deschaintre18"}"
 gpus="${3:-"1"}"
 batch="${4:-"8"}"
-gamma="${5:-"20"}"
+gamma="${5:-"10"}"
 snap="${6:-"1"}"
 workers="${7:-"1"}"
+glr="${8:-"0.0025"}"
+dlr="${9:-"0.002"}"
 
 cd eg3d
 
@@ -23,4 +25,4 @@ cd eg3d
 # train_svbrdf.py L268 MonoPlaneNoSRGenerator 
 python3 train_svbrdf_noSR.py --outdir=$outdir --cfg=ffhq --data=$dataRoot --workers=$workers\
   --gpus=$gpus --batch=$batch --gamma=$gamma --gen_pose_cond=False --cond=False --density_reg 0 --metrics none --snap $snap\
-  --neural_rendering_resolution_initial 128
+  --neural_rendering_resolution_initial 128 --glr=$glr --dlr=$dlr
